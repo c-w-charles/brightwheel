@@ -134,17 +134,81 @@ def merge_provider_files():
     df_web = pd.read_csv(web_file_name)
     df_attached = pd.read_csv(attached_file_name_with_header)
 
-    # Merge 3 dataframes into 1
-    merged_df = pd.merge(df_api, df_web, on="provider_name").merge(
-        df_attached, on="provider_name"
+    # Clean up attached file
+    df_attached = df_attached.drop_duplicates()
+    df_attached["address"] = df_attached["address"].apply(str)
+    df_attached["phone"] = df_attached["phone"].apply(str)
+    df_attached["phone"] = (
+        "("
+        + df_attached["phone"].str[:3]
+        + ") "
+        + df_attached["phone"].str[3:6]
+        + "-"
+        + df_attached["phone"].str[6:]
+    )
+    df_attached["address"] = df_attached["address"].str.replace("nan", "")
+    df_attached["dupe_count"] = df_attached.groupby(["provider_name", "phone"])[
+        "provider_name"
+    ].transform("count")
+    df_attached = df_attached.sort_values(by=["provider_name", "phone"])
+    df_attached.to_csv(attached_file_name_with_header, index=False)
+
+    # Merge api and web dataframes
+    df_merged = pd.merge(
+        df_api,
+        df_web[
+            [
+                "provider_name",
+                "phone",
+                "type_of_care",
+                "address",
+                "city",
+                "state",
+                "zip",
+            ]
+        ],
+        on=["provider_name", "phone"],
+        how="left",
+    )
+
+    # Merge attached dataframe
+    df_merged = pd.merge(
+        df_merged,
+        df_attached,
+        on=["provider_name", "phone"],
+        how="left",
+    )
+
+    # Use whichever column has a non-null value
+    df_merged.loc[df_merged["type_of_care_x"].isnull(), "type_of_care_x"] = df_merged[
+        "type_of_care_y"
+    ]
+    df_merged.loc[df_merged["address_x"].isnull(), "address_x"] = df_merged["address_y"]
+    df_merged.loc[df_merged["city_x"].isnull(), "city_x"] = df_merged["city_y"]
+    df_merged.loc[df_merged["state_x"].isnull(), "state_x"] = df_merged["state_y"]
+    df_merged.loc[df_merged["zip_x"].isnull(), "zip_x"] = df_merged["zip_y"]
+    df_merged["address_x"] = df_merged["address_x"].str.replace("nan", "")
+
+    # Drop extraneous columns and rename 'x' columns
+    df_merged = df_merged.drop(
+        columns=["type_of_care_y", "address_y", "city_y", "state_y", "zip_y"]
+    )
+    df_merged = df_merged.rename(
+        columns={
+            "type_of_care_x": "type_of_care",
+            "address_x": "address",
+            "city_x": "city",
+            "state_x": "state",
+            "zip_x": "zip",
+        }
     )
 
     # Sort df by provider name
-    merged_df = merged_df.sort_values(by=["provider_name"])
+    df_merged = df_merged.sort_values(by=["provider_name"])
 
     # Write to csv file
     merged_file_name = "merged_providers.csv"
-    merged_df.to_csv(merged_file_name, index=False)
+    df_merged.to_csv(merged_file_name, index=False)
 
 
 if __name__ == "__main__":
